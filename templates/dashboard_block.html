@@ -16,8 +16,8 @@
 	<h3><i class="{{ config[group]['icon'] }}" aria-hidden="true"></i> {{ group }}</h3>
 	<div class="content">
 	{% for tag, info in config[group]['info'].items() %}
-	<label>{{ escape(info['title']) }}{% if 'value' in info %}:{% end %}</label>
-	{% if 'value' in info %}
+	<label>{{ escape(info['title']) }}{% if info.get('value') is not None %}:{% end %}</label>
+	{% if info.get('value') is not None %}
 	{% if 'url' in info %}
 		<a href="{{ info['url'] }}">{{ escape(info['value']) }}</a>
 	{% else %}
