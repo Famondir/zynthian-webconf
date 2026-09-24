@@ -297,11 +297,23 @@ class DashboardHandler(ZynthianBasicHandler):
 
     @staticmethod
     def get_git_info(path, check_updates=False):
-        branch = check_output(f"cd {path}; git branch | grep '*'", shell=True).decode()[2:-1]
-        gitid = check_output(f"cd {path}; git rev-parse HEAD", shell=True).decode()[:-1]
-        if check_updates:
-            update = check_output(f"cd {path}; git remote update; git status --porcelain -bs | grep behind | wc -l", shell=True).decode()
-        else:
+        # These repos are cloned as root at Docker build time but the
+        # container (and the native desktop install's own checkouts) run
+        # as a non-root user - git's "dubious ownership" safe-directory
+        # check makes any git command here exit non-zero, which check_output
+        # turns into an uncaught CalledProcessError and 500s the whole
+        # dashboard. Same category as get_i2c_chips()'s missing-hardware
+        # handling above: tolerate absence instead of propagating.
+        try:
+            branch = check_output(f"cd {path}; git branch | grep '*'", shell=True).decode()[2:-1]
+            gitid = check_output(f"cd {path}; git rev-parse HEAD", shell=True).decode()[:-1]
+            if check_updates:
+                update = check_output(f"cd {path}; git remote update; git status --porcelain -bs | grep behind | wc -l", shell=True).decode()
+            else:
+                update = None
+        except Exception:
+            branch = "unknown"
+            gitid = "unknown"
             update = None
         return {"branch": branch, "gitid": gitid, "update": update}
 
