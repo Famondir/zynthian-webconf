@@ -24,8 +24,6 @@
 
 import os
 import re
-import PAM
-import bcrypt
 import logging
 import tornado.web
 from subprocess import check_output
@@ -115,93 +113,17 @@ class SecurityConfigHandler(ZynthianConfigHandler):
             self.get(errors)
 
     def update_system_config(self, config):
-        # PAM service callback
-        def pam_conv(auth, query_list, userData):
-            resp = []
-            for i in range(len(query_list)):
-                query, type = query_list[i]
-                if type in (PAM.PAM_PROMPT_ECHO_ON, PAM.PAM_PROMPT_ECHO_OFF):
-                    val = passwd
-                    resp.append((val, 0))
-                elif type == PAM.PAM_PROMPT_ERROR_MSG or type == PAM.PAM_PROMPT_TEXT_INFO:
-                    logging.error(query)
-                    resp.append(('', 0))
-                else:
-                    return None
-            return resp
-
-        # Check current password
-        auth = PAM.pam()
-        auth.start("passwd")
-        auth.set_item(PAM.PAM_USER, "root")
-        auth.set_item(PAM.PAM_CONV, pam_conv)
-        try:
-            passwd = self.get_argument("CURRENT_PASSWORD")
-            auth.authenticate()
-            auth.acct_mgmt()
-        except PAM.error as resp:
-            logging.info(f"Incorrect password => {resp}")
-            return {"CURRENT_PASSWORD": "Incorrect Password"}
-        except Exception as e:
-            logging.error(e)
-            return {"CURRENT_PASSWORD": "Authentication Failure"}
-
-        # Change password
+        # Desktop-port variant: upstream re-authenticates via PAM against the
+        # system root password here, then also rewrites the VNC/WIFI-hotspot/
+        # filebrowser passwords and the system account password - none of
+        # which apply to the desktop dev container/native install (no PAM
+        # root account in play, no WIFI hotspot, no guaranteed filebrowser
+        # service). The session is already `@tornado.web.authenticated`, so
+        # skip the redundant re-auth and simply refuse password changes here;
+        # the login password is set via ZYNTHIAN_WEBCONF_PASSWORD by whatever
+        # launched this process instead.
         if len(config['PASSWORD'][0]) > 0:
-            if len(config['PASSWORD'][0]) < 6:
-                return {'PASSWORD': "Password must have at least 6 characters"}
-            if config['PASSWORD'][0] != config['REPEAT_PASSWORD'][0]:
-                return {'REPEAT_PASSWORD': "Passwords does not match!"}
-
-            pattern = re.compile(
-                r'(?P<quote>")|'
-                r'(?P<backtick>`)|'
-                r'(?P<backslash>\\)|'
-                r'(?P<shell>\$\([^)]*\))'
-            )
-            match = pattern.search(config['PASSWORD'][0])
-            if match:
-                if match.lastgroup == 'shell':
-                    return {'PASSWORD': f"Illegal character sequence in password: $(..)"}
-                else:
-                    return {'PASSWORD': f"Illegal character sequence in password: {match.lastgroup}"}
-
-            # Change system password (PAM)
-            try:
-                passwd = config['PASSWORD'][0]
-                auth.chauthtok()
-                # auth.acct_mgmt()
-            except PAM.error as resp:
-                logging.error(f"Can't set new password! => {resp}")
-                return {'REPEAT_PASSWORD': "Can't set new password for system!"}
-            except Exception as e:
-                logging.error(f"Can't set new password! => {e}")
-                return {'REPEAT_PASSWORD': "Can't set new password for system!"}
-
-            # Change VNC password
-            try:
-                check_output(f"echo \"{config['PASSWORD'][0]}\" | vncpasswd -f > /root/.vnc/passwd; chmod go-r /root/.vnc/passwd", shell=True)
-            except Exception as e:
-                logging.error(f"Can't set new password for VNC Server! => {e}")
-                return {'REPEAT_PASSWORD': "Can't set new password for VNC Server!"}
-
-            # Change WIFI password
-            try:
-                #check_output(f"nmcli con modify zynthian-ap wifi-sec.psk \"{config['PASSWORD'][0]}\"", shell=True)
-                check_output(f"nmcli con modify zynthian-ap wifi-sec.psk", shell=True)
-            except Exception as e:
-                logging.error(f"Can't set new password for WIFI HotSpot! => {e}")
-                return {'REPEAT_PASSWORD': "Can't set new password for WIFI HotSpot!"}
-
-            # Change filebrowser password
-            try:
-                check_output("systemctl stop filebrowser", shell=True)
-                check_output(f"cd $ZYNTHIAN_SW_DIR/filebrowser; ./filebrowser users update zynthian --password \"{config['PASSWORD'][0]}\"", shell=True)
-                check_output("systemctl start filebrowser", shell=True)
-            except Exception as e:
-                logging.error(f"Can't set new password for filebrowser! => {e}")
-                return {'REPEAT_PASSWORD': "Can't set new password for File Browser!"}
-
+            return {'PASSWORD': "Password changes aren't supported in this environment - set ZYNTHIAN_WEBCONF_PASSWORD instead"}
 
         # Update Hostname
         newHostname = config['HOSTNAME'][0]

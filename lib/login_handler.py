@@ -23,13 +23,23 @@
 # ********************************************************************
 
 import os
-import PAM
+import hmac
 import logging
 import tornado.web
 
 # ------------------------------------------------------------------------------
 # Login Handler
 # ------------------------------------------------------------------------------
+#
+# Desktop-port variant: upstream authenticates via PAM against the *system*
+# root account, which assumes webconf runs as root on real Zynthian hardware.
+# In the desktop Docker image and the desktop native install, the process
+# deliberately does not run as root, so PAM auth against root's password
+# isn't available (and wouldn't be desirable - that'd be the host machine's
+# real root password). Authenticate against ZYNTHIAN_WEBCONF_PASSWORD
+# instead, set by whatever launches this process. If that env var isn't
+# set, login is refused outright rather than silently accepting any/no
+# password.
 
 
 class LoginHandler(tornado.web.RequestHandler):
@@ -39,39 +49,17 @@ class LoginHandler(tornado.web.RequestHandler):
                     title="Login", config=None, errors=errors)
 
     def post(self):
-        def pam_conv(auth, query_list, userData):
-            resp = []
-            for i in range(len(query_list)):
-                query, type = query_list[i]
-                if type in (PAM.PAM_PROMPT_ECHO_ON, PAM.PAM_PROMPT_ECHO_OFF):
-                    val = self.get_argument("PASSWORD")
-                    resp.append((val, 0))
-                elif type == PAM.PAM_PROMPT_ERROR_MSG or type == PAM.PAM_PROMPT_TEXT_INFO:
-                    logging.error(query)
-                    resp.append(('', 0))
-                else:
-                    return None
-            return resp
-
-        auth = PAM.pam()
-        auth.start("passwd")
-        auth.set_item(PAM.PAM_USER, "root")
-        auth.set_item(PAM.PAM_CONV, pam_conv)
-        try:
-            auth.authenticate()
-            auth.acct_mgmt()
-        except PAM.error as resp:
-            logging.info(f"Incorrect password => {resp}")
-            self.get({"PASSWORD": "Incorrect Password"})
-        except Exception as e:
-            logging.error(e)
-            self.get({"PASSWORD": "Authentication Failure"})
-        else:
+        expected_password = os.environ.get("ZYNTHIAN_WEBCONF_PASSWORD")
+        supplied_password = self.get_argument("PASSWORD", "")
+        if expected_password and hmac.compare_digest(supplied_password, expected_password):
             self.set_secure_cookie("user", "root", expires_days=3650)
             if self.get_argument("next", ""):
                 self.redirect(self.get_argument("next"))
             else:
                 self.redirect("/")
+        else:
+            logging.info("Incorrect password")
+            self.get({"PASSWORD": "Incorrect Password"})
 
 
 class LogoutHandler(tornado.web.RequestHandler):
