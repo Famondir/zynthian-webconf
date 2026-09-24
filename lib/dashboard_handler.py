@@ -348,8 +348,17 @@ class DashboardHandler(ZynthianBasicHandler):
 
     @staticmethod
     def get_i2c_chips():
+        # Desktop-port variant: called at *module* import time (see
+        # wiring_config_handler.py), so an unhandled failure here crashes
+        # webconf at startup - there's no I2C bus / GPIO expansion board to
+        # probe on a desktop VM/container/laptop (no i2cdetect binary, no
+        # /dev/i2c-1), unlike get_temperature()/get_volume_info() elsewhere
+        # in this file, which already tolerate missing hardware the same way.
         res = []
-        out = check_output("i2cdetect -y 1", shell=True).decode().split("\n")
+        try:
+            out = check_output("i2cdetect -y 1", shell=True).decode().split("\n")
+        except Exception:
+            return res
         if len(out) > 3:
             for i in range(1, 8):
                 for adr in out[i][4:].split(" "):
