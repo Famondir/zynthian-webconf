@@ -325,7 +325,25 @@ class DashboardHandler(ZynthianBasicHandler):
 
     @staticmethod
     def get_os_info():
-        return check_output("lsb_release -ds", shell=True).decode()
+        # lsb_release isn't installed on this minimal Ubuntu image (the
+        # lsb-release package is a separate, non-default apt install) -
+        # 500'd the dashboard on every load, same uncaught-CalledProcessError
+        # category as get_i2c_chips()/get_git_info() above. /etc/os-release
+        # is present on effectively every modern distro (no extra package
+        # needed) and gives the same human-readable info lsb_release -ds
+        # would have, so prefer it outright rather than just catching the
+        # missing-binary case.
+        try:
+            with open("/etc/os-release") as f:
+                for line in f:
+                    if line.startswith("PRETTY_NAME="):
+                        return line.split("=", 1)[1].strip().strip('"')
+        except Exception:
+            pass
+        try:
+            return check_output("lsb_release -ds", shell=True).decode()
+        except Exception:
+            return "Unknown"
 
     @staticmethod
     def get_build_info():
